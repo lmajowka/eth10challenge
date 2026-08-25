@@ -1,0 +1,10 @@
+# cust / cust_raw's build script locates the CUDA driver library (libcuda) by
+# treating each CUDA_LIBRARY_PATH entry as a CUDA *root* that must contain a
+# `lib64/` dir and `include/cuda.h`. On this distro-packaged CUDA install
+# (nvcc in /usr/bin) that root is /usr/lib/cuda. Setting it here means a plain
+# `cargo build` works without the caller exporting anything.
+#
+# A real environment variable of the same name overrides this value, so other
+# machines (e.g. /usr/local/cuda) can point elsewhere without editing this file.
+[env]
+CUDA_LIBRARY_PATH = "/usr/lib/cuda"
