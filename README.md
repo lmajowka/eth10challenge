@@ -102,15 +102,18 @@ words swapped. It resolves to `spell scene mask ...` at candidate index
 **Known positions plus a word pool:**
 ```bash
 ./target/release/words-breaker 0x… \
-  --pattern "dutch ? ? ? fog ? ? ? ? ? ? parrot" \
-  --pool "fork fiber forest dinner goat seed key lake"
+  --pattern "dutch ? ? fiber fog ? ? ? ? ? ? parrot" \
+  --pool "fork forest dinner goat seed key lake" \
+  --fill "d*,f*"
 ```
 
-Three words are pinned to positions 1, 5 and 12; the eight pool words permute
-over the nine open slots, and the ninth slot — whichever it turns out to be — is
-drawn from the full 2048-word list. That is `9!/1! x 2048 = 743,178,240`
-candidates. The tool prints this count before starting, so a miscounted pool is
-caught in a second rather than an hour in.
+Four words are pinned to positions 1, 4, 5 and 12; the seven pool words permute
+over the eight open slots, and the eighth slot — whichever it turns out to be —
+is drawn from the fill set. That is `P(8,7) x 218 = 40,320 x 218 = 8,789,760`
+candidates, about four seconds. Drop `--fill` and the same search draws that
+slot from all 2048 words instead: `40,320 x 2048 = 82,575,360`, roughly ten
+times the work for one extra unknown. The tool prints this count before
+starting, so a miscounted pool is caught in a second rather than an hour in.
 
 **Verify the GPU implementation:**
 ```bash
@@ -184,6 +187,65 @@ SHA-512 compressions. Three things matter most:
 
 Candidate batches are generated on a producer thread so the CPU-side permutation
 stream overlaps with the GPU work rather than running between launches.
+
+## The 10 ETH Challenge
+
+This fork exists to attack the Guntis Vitolins "10 ETH challenge" (published
+2020-02-12, YouTube `w4mpiuBP_aY`): a MetaMask wallet whose 12-word English
+BIP-39 phrase — no passphrase — was split across a video and a blog post.
+
+Target `0x9C2F44EFAd0c1E852a09dF9939e6DaF061140CaF` at `m/44'/60'/0'/0/0`,
+confirmed on-chain to hold 8.612541554256944620 ETH.
+
+### What is known
+
+| Position | Word |
+|---|---|
+| 1 | `dutch` |
+| 4 | `fiber` |
+| 5 | `fog` |
+| 12 | `parrot` |
+
+That leaves eight open slots (2-3, 6-11). `fork` is a confirmed word of
+unknown position, so seven slots are genuinely unknown. The `fog` pin is
+corroborated: unpinning position 5 and replacing it with any `d*`/`f*` word
+(791M candidates) found no match.
+
+### Extracting the pool
+
+Both independently confirmed words appear as exact verbatim tokens in the
+planted sentences, which supports the simplest rule: **take every token that is
+an exact BIP-39 word, grammatical connectors included.** BIP-39's four-letter
+uniqueness means stems resolve (`healthy` -> `health`, `hunter` -> `hunt`).
+
+The blog sentences yield 14 words — `round dutch cattle forest wood only
+because there fiber like rib roast dinner fresh` — and the video fragment
+yields exactly 6, matching the 6 the puzzle hides there: `expect easy there
+will fog lake`. `parrot` appears in neither, so the source text in hand is
+incomplete.
+
+### Progress
+
+Searched with no match: the original 8-word pool and its variants (743M each),
+13- and 14-word pools (259M / 726M), and an all-`d`/`f` 12-word theory both
+pinned and with **all 12 words free in every ordering** (479M). That last run
+is the decisive one — with positions fully unconstrained, the word *set* is
+wrong, not the ordering. Per-word drop runs then ruled out a single bad word
+among the unpinned ones.
+
+The binding constraint is the word pool, not throughput. With the four pins
+held and free slots drawn from the 218 `d*`/`f*` words:
+
+| unknown slots | space | time |
+|---|---|---|
+| 0 | 40,320 | 0.02 s |
+| 1 | 8.8M | 3.6 s |
+| 2 | 9.6e8 | 6.6 min |
+| 3 | 7.0e10 | 8.0 h |
+| 4 | 3.8e12 | 18 days |
+
+Three unknowns is an overnight run; four is not practical. One more confirmed
+word is worth more than any amount of GPU tuning.
 
 ## License
 
