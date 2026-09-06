@@ -68,9 +68,12 @@ words-breaker <TARGET_ADDRESS> <WORD1> <WORD2> ... <WORD12> [OPTIONS]
 | `--pattern` | | 12 space-separated slots, `?` for an unknown one. Non-`?` slots are pinned to that position. Replaces the positional word list. |
 | `--pool` | | Words that fill the `?` slots, each used at most once. Fewer pool words than `?` slots means the leftovers are drawn from the fill set. |
 | `--fill` | whole wordlist | Restricts what a leftover `?` slot may hold. Takes literal words and `prefix*` patterns, e.g. `--fill "d*,f*"`. Each leftover slot multiplies the search by this set's size, so this is the strongest lever available. |
+| `--post` | | Two-batch mode: the 6 phrase words hidden in the blog post. `word@N` pins that word at position N (1-based) and assigns it to this batch; bare words are candidates for the batch's remaining slots. Requires `--video`; replaces `--pattern`/`--pool`/`--fill` and the positional word list. |
+| `--video` | | Two-batch mode: the 6 phrase words hidden in the video, same syntax as `--post`. |
 | `-l, --language` | `english` | BIP-39 wordlist language |
 | `-t, --threads` | `0` (all cores) | CPU threads (CPU path only) |
 | `--cpu` | off | Force the CPU (rayon) search instead of the GPU |
+| `--no-checksum` | off | Skip the BIP-39 checksum pre-filter and derive an address for every candidate. A conforming mnemonic always has a valid checksum, so this only reaches phrases from a non-conforming generator, at ~16x the cost. |
 | `--selftest` | | Verify each GPU crypto primitive against the CPU reference and exit |
 | `-h, --help` | | Print help |
 | `-V, --version` | | Print version |
@@ -114,6 +117,25 @@ candidates, about four seconds. Drop `--fill` and the same search draws that
 slot from all 2048 words instead: `40,320 x 2048 = 82,575,360`, roughly ten
 times the work for one extra unknown. The tool prints this count before
 starting, so a miscounted pool is caught in a second rather than an hour in.
+
+**Two batches of six (post + video):**
+```bash
+./target/release/words-breaker 0x… \
+  --post "dutch@1 fiber@4 forest dinner rib roast fresh cattle" \
+  --video "fog@5 parrot@12 expect easy there will lake"
+```
+
+Each batch contributes exactly 6 of the 12 words. `dutch@1` and `fiber@4` are
+pinned and counted against the post's six; `fog@5` and `parrot@12` against the
+video's. The post's 4 remaining words are drawn from its 8 candidates and the
+video's 4 from its 5, each pool without replacement — and *which* of the 8 open
+slots belong to which batch is enumerated too. The space is
+`C(8,4) x P(8,4) x P(5,4) = 70 x 1,680 x 120 = 14,112,000`, printed before the
+search starts. A word whose batch you know but whose position you don't goes
+in that batch's candidate list unpinned (like `fork`); a word whose *batch* is
+unknown has to be tried in one batch per run. There is no fill-set
+fallback in this mode: each batch must supply at least as many candidates as it
+has open slots.
 
 **Verify the GPU implementation:**
 ```bash

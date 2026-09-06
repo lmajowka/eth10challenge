@@ -985,11 +985,16 @@ __device__ int bip39_checksum_ok(const unsigned short idx[12]) {
 // Pass 1: keep only candidates with a valid BIP-39 checksum (~1/16). Survivor
 // candidate indices are compacted into `survivors` via an atomic counter, so the
 // heavy second pass runs with no warp divergence.
+//
+// With `check` == 0 (host --no-checksum) every candidate passes through, which
+// costs 16x the derivations. `survivors` is sized for the whole batch, so the
+// pass-through still fits.
 extern "C" __global__
-void k_filter(const unsigned short* cand, u32 n, u32* survivors, u32* counter) {
+void k_filter(const unsigned short* cand, u32 n, u32* survivors, u32* counter,
+              u32 check) {
     u32 i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
-    if (bip39_checksum_ok(cand + (u64)i * 12)) {
+    if (!check || bip39_checksum_ok(cand + (u64)i * 12)) {
         u32 slot = atomicAdd(counter, 1u);
         survivors[slot] = i;
     }

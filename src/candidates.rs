@@ -44,6 +44,70 @@ pub fn count(slots: &[Slot; 12], pool_len: usize, fill_len: usize) -> u128 {
     }
 }
 
+/// Falling factorial `n!/(n-k)!` — arrangements of `k` items out of `n`.
+fn perm(n: usize, k: usize) -> u128 {
+    ((n - k + 1)..=n).map(|x| x as u128).product()
+}
+
+/// Exactly how many candidates [`stream_two_pools`] will yield.
+///
+/// `h` holes of which `a` take pool-1 words (the rest take pool-2 words):
+/// choose which holes belong to pool 1 (`C(h, a)`), then arrange each pool
+/// over its side of the split.
+pub fn count_two_pools(h: usize, a: usize, p1: usize, p2: usize) -> u128 {
+    let b = h - a;
+    let choose = perm(h, a) / perm(a, a);
+    choose * perm(p1, a) * perm(p2, b)
+}
+
+/// Streams every candidate of a two-pool split.
+///
+/// Exactly `a` of the holes are filled from `pool1` and the remaining holes
+/// from `pool2`, each pool drawn without replacement (surplus pool words mean
+/// subsets are enumerated too, as in [`stream`]). Which holes belong to which
+/// pool is part of the enumeration. Requires `pool1.len() >= a` and
+/// `pool2.len() >= holes - a`; there is no fill-set fallback in this mode.
+pub fn stream_two_pools(
+    slots: [Slot; 12],
+    a: usize,
+    pool1: Vec<u16>,
+    pool2: Vec<u16>,
+) -> Box<dyn Iterator<Item = [u16; 12]> + Send> {
+    let holes: Vec<usize> = (0..12).filter(|&i| slots[i] == Slot::Hole).collect();
+    let mut base = [0u16; 12];
+    for (i, s) in slots.iter().enumerate() {
+        if let Slot::Fixed(w) = *s {
+            base[i] = w;
+        }
+    }
+
+    let b = holes.len() - a;
+    let all_holes = holes.clone();
+    Box::new(holes.into_iter().combinations(a).flat_map(move |side1| {
+        let side2: Vec<usize> = all_holes
+            .iter()
+            .copied()
+            .filter(|i| !side1.contains(i))
+            .collect();
+        let pool1 = pool1.clone();
+        let pool2 = pool2.clone();
+        pool1.into_iter().permutations(a).flat_map(move |arr1| {
+            let mut tmpl = base;
+            for (&slot, &w) in side1.iter().zip(&arr1) {
+                tmpl[slot] = w;
+            }
+            let side2 = side2.clone();
+            pool2.clone().into_iter().permutations(b).map(move |arr2| {
+                let mut out = tmpl;
+                for (&slot, &w) in side2.iter().zip(&arr2) {
+                    out[slot] = w;
+                }
+                out
+            })
+        })
+    }))
+}
+
 /// Streams every candidate the template describes.
 ///
 /// Nothing is collected up front: memory stays flat no matter how large the
@@ -210,6 +274,41 @@ mod tests {
         slots[4] = Slot::Fixed(2);
         slots[11] = Slot::Fixed(3);
         assert_eq!(count(&slots, 8, 2048), 743_178_240);
+    }
+
+    /// `count_two_pools` must agree with what `stream_two_pools` yields, and
+    /// the split invariant must hold: exactly `a` open slots carry pool-1 words.
+    #[test]
+    fn two_pools_count_matches_stream() {
+        // Pool words are disjoint ranges so each word's batch is identifiable.
+        for (n_holes, a, p1, p2) in [
+            (4usize, 2usize, 2usize, 2usize), // exact fit both sides
+            (4, 2, 3, 3),                     // surplus both sides (subsets too)
+            (5, 3, 3, 2),                     // uneven split
+            (3, 0, 0, 3),                     // one side empty
+            (3, 3, 3, 0),                     // other side empty
+        ] {
+            let slots = holes(n_holes);
+            let pool1: Vec<u16> = (100..100 + p1 as u16).collect();
+            let pool2: Vec<u16> = (200..200 + p2 as u16).collect();
+            let want = count_two_pools(n_holes, a, p1, p2);
+            let got: Vec<_> = stream_two_pools(slots, a, pool1.clone(), pool2.clone()).collect();
+            assert_eq!(got.len() as u128, want, "h={n_holes} a={a} p1={p1} p2={p2}");
+            let uniq: HashSet<_> = got.iter().collect();
+            assert_eq!(uniq.len(), got.len(), "duplicates for h={n_holes} a={a}");
+            for c in &got {
+                let from1 = (0..n_holes).filter(|&i| pool1.contains(&c[i])).count();
+                let from2 = (0..n_holes).filter(|&i| pool2.contains(&c[i])).count();
+                assert_eq!((from1, from2), (a, n_holes - a), "split violated in {c:?}");
+            }
+        }
+    }
+
+    /// The challenge's two-batch shape: dutch@1+fiber@4 post, fog@5+parrot@12
+    /// video, 4 open slots per batch, 8 candidates per pool.
+    #[test]
+    fn two_pools_challenge_shape() {
+        assert_eq!(count_two_pools(8, 4, 8, 8), 70 * 1680 * 1680);
     }
 
     /// 12 loose words must still enumerate exactly 12!, unchanged.

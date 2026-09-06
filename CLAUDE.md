@@ -11,7 +11,15 @@ cargo build --release
 ./target/release/words-breaker --selftest          # verify GPU primitives vs CPU
 ./target/release/words-breaker <ADDR> <12 words>   # loose-word mode
 ./target/release/words-breaker <ADDR> --pattern "dutch ? ? ? fog ? ? ? ? ? ? parrot" --pool "..."
+./target/release/words-breaker <ADDR> --post "dutch@1 fiber@4 <cands>" --video "fog@5 parrot@12 <cands>"
 ```
+
+Two-batch mode (`--post`/`--video`): exactly 6 words per batch, `word@N` pins a
+word at position N *and* assigns it to that batch, bare words are that batch's
+candidates (drawn without replacement, subsets enumerated when the pool is
+oversize). Which open slots belong to which batch is enumerated. Space:
+`C(h, a) * P(p_post, a) * P(p_video, h-a)` with `h` open slots of which `a` are
+post-open. No `--fill` fallback in this mode.
 
 `nvcc` + an NVIDIA GPU are required to build; `CUDA_LIBRARY_PATH` is set in
 `.cargo/config.toml` to `/usr/lib/cuda` (distro CUDA layout). `--cpu` forces the
@@ -22,7 +30,7 @@ rayon path. See README.md for the full flag table.
 | File | Role |
 |---|---|
 | `src/main.rs` | CLI, pattern/pool parsing, address checksum validation |
-| `src/candidates.rs` | the single enumerator: 12 slots (pinned or open) + pool drawn without replacement + `--fill` set for leftovers |
+| `src/candidates.rs` | the enumerators: `stream` (12 slots + one pool + `--fill` for leftovers) and `stream_two_pools` (6+6 batch split) |
 | `src/gpu.rs` | CUDA host side: batching, producer thread, checksum pre-filter, `--selftest` |
 | `src/cuda/kernels.cu` | SHA-256/512, Keccak-256, HMAC, PBKDF2, secp256k1, BIP32, `k_pipeline` |
 | `src/eth.rs` | CPU reference implementation (also the selftest oracle) |
@@ -134,7 +142,25 @@ All against the target above, all no match:
 - pins held, pool of `fork fiber` + candidates incl. `deliver`, `detail`,
   `digital`, `day`: pools of 10/11/12/13 → 3.6M / 20M / 80M / 259M
 
-None of these need re-running under the new `fiber`@4 pin: every one of them
+All four pins held (`dutch`@1, `fiber`@4, `fog`@5, `parrot`@12), 2026-08-25:
+
+- pool `dinner deliver fork forest winter shop update seed` — exact fit to the
+  8 open slots (40.3K)
+- pool `fork roast expect any live fresh because cattle` — exact fit (40.3K).
+  Note `anything` and `living` are **not** BIP-39 words; `any`/`live` are the
+  only stems they resolve to.
+- pool `fork roast expect fresh because cattle` + 2 slots over any `d*`/`f*`
+  (958M) — closes that whole two-word family, not just one ordering
+- pool `easy goat sponsor fork seed` + 3 slots over the 21-word candidate list
+  `round cattle forest wood only because there like rib roast dinner fresh
+  expect will lake deliver winter shop update any live` (62.2M), and the same
+  with `sponsor donor` added to the fill set (81.8M)
+- pool `easy goat sponsor fork seed update video sponsor donor key find round
+  cattle forest wood dinner` — all P(16,8) = 518.9M orderings. Strong negative:
+  with the pins right, the other 8 words are **not** all drawn from that set.
+- the same pool + `roast`, all P(17,8) = 980.2M — same conclusion, 17 words.
+
+None of the earlier (pre-pin) runs need re-running under the `fiber`@4 pin: every one of them
 either let `fiber` float freely (so `fiber`@4 was already covered) or excluded
 `fiber` entirely. The pin narrows future searches, it does not reopen past ones.
 
@@ -143,6 +169,15 @@ word set itself is wrong.** The per-word drop runs then show it is not a single
 wrong word among the nine unpinned ones either. So ≥2 words are wrong, or one
 of the three pins is — and given the pins are corroborated, the pool is the
 likelier error.
+
+### In flight
+
+`/home/leo/words-breaker-sweep/sweep.sh` (started 2026-08-25): the 17-word pool
+into 7 open slots, with the 8th open slot pinned to each of the 2048 BIP-39
+words in turn — 8 x 2048 sub-runs of P(17,7)=98.0M each, ~1.6e12 total, ~7.6
+days. Resumable: `done.txt` holds every finished `slot:word`, re-running the
+script picks up from there; a hit lands in `HIT.txt`. This tests exactly one
+hypothesis — all four pins right and exactly *one* phrase word outside the 17.
 
 ### Untried levers, cheapest first
 

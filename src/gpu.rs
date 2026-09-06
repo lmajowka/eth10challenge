@@ -282,6 +282,7 @@ impl Gpu {
         wordlist: &GpuWordlist,
         target: &[u8; 20],
         batch_size: usize,
+        checksum: bool,
     ) -> Result<Option<SearchHit>> {
         let d_wordlist = DeviceBuffer::from_slice(&wordlist.packed)?;
         let d_lens = DeviceBuffer::from_slice(&wordlist.lens)?;
@@ -348,7 +349,8 @@ impl Gpu {
             unsafe {
                 launch!(filter<<<grid, block, 0, stream>>>(
                     d_cand.as_device_ptr(), n as u32,
-                    d_survivors.as_device_ptr(), d_counter.as_device_ptr()
+                    d_survivors.as_device_ptr(), d_counter.as_device_ptr(),
+                    checksum as u32
                 ))?;
             }
             stream.synchronize()?;
